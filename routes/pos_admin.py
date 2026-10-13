@@ -20,9 +20,13 @@ router = APIRouter(
     tags=["Admin - Point of Sale"]
 )
 
+from typing import Optional
+
 class POSCartItem(BaseModel):
-    inventory_item_id: UUID = None
-    print_job_id: UUID = None
+    inventory_item_id: Optional[UUID] = None
+    print_job_id: Optional[UUID] = None
+    item_name: Optional[str] = None
+    unit_price: Optional[float] = 0.0
     quantity: int = 1
     is_loose: bool = False
     discount: float = 0.0
@@ -116,6 +120,13 @@ def process_sale(
             # Optional: Update job status
             if db_job.status == "PENDING":
                 db_job.status = "COMPLETED"
+        elif cart_item.item_name:
+            # Custom / Ad-hoc Item
+            unit_price = float(cart_item.unit_price or 0.0)
+            line_price = unit_price * cart_item.quantity
+            item_name = cart_item.item_name
+            inv_id = None
+            pj_id = None
         else:
             continue
             
@@ -281,12 +292,12 @@ def get_pos_history(
         
         items_detail = []
         for item in bill.items:
-            inventory_item = db.query(InventoryItem).filter(InventoryItem.id == item.inventory_item_id).first()
-            item_name = inventory_item.name if inventory_item else "Unknown Item"
+            inventory_item = db.query(InventoryItem).filter(InventoryItem.id == item.inventory_item_id).first() if item.inventory_item_id else None
+            item_name = inventory_item.name if inventory_item else (item.item_name or "Custom Item")
             hsn_code = str(inventory_item.hsn_code) if inventory_item and inventory_item.hsn_code else "-"
-            gst_val = float(inventory_item.gst or 0.0) if inventory_item else 0.0
+            gst_val = float(inventory_item.gst or 0.0) if inventory_item else float(getattr(item, 'gst_at_sale', 0.0) or 0.0)
             expiry = inventory_item.expiry_date.strftime("%Y-%m-%d") if inventory_item and inventory_item.expiry_date else "-"
-            unit_price = float(item.unit_price_at_sale)
+            unit_price = float(item.unit_price_at_sale or 0.0)
             items_detail.append({
                 "name": item_name,
                 "qty": item.quantity,

@@ -155,7 +155,7 @@ def generate_shop_bill_pdf(bill, shop) -> io.BytesIO:
     for item in bill.items:
         # Resolve item name
         inv_item = getattr(item, "inventory_item", None)
-        item_name = inv_item.name if inv_item else "Item"
+        item_name = inv_item.name if inv_item else (item.item_name or "Custom Item")
         data.append([
             item_name[:20],
             str(item.quantity),
