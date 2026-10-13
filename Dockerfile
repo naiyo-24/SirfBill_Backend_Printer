@@ -20,9 +20,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Expose port 8010
-EXPOSE 8028
+# Expose port 8030
+EXPOSE 8030
 
 # Start the application. 
 # Base.metadata.create_all(bind=engine) in main.py will handle creating tables!
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8028", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8030", "--reload"]
