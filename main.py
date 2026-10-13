@@ -49,6 +49,8 @@ app.add_middleware(
 
 # Mount the static files directory
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+os.makedirs("downloads", exist_ok=True)
+app.mount("/downloads", StaticFiles(directory="downloads"), name="downloads")
 
 from routes.user import router as user_router
 # from routes.doctor import router as doctor_router
@@ -112,10 +114,12 @@ app.include_router(purchase_admin_router)
 from routes.print_services import router as print_services_router
 from routes.print_jobs import router as print_jobs_router
 from routes.machines import router as machines_router
+from routes.app_version import router as app_version_router
 
 app.include_router(print_services_router)
 app.include_router(print_jobs_router)
 app.include_router(machines_router)
+app.include_router(app_version_router)
 
 @app.get("/")
 def read_root():

@@ -51,10 +51,12 @@ services:
       - sirfbill_printer_net
     volumes:
       - uploads_data:/app/uploads
+      - downloads_data:/app/downloads
 
 volumes:
   db_data:
   uploads_data:
+  downloads_data:
 
 networks:
   sirfbill_printer_net:
