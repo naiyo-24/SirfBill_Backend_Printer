@@ -18,6 +18,7 @@ class ShopSettingsBase(BaseModel):
     ac_holder_name: Optional[str] = None
     ac_number: Optional[str] = None
     ifsc_code: Optional[str] = None
+    upi_id: Optional[str] = None
     terms_1: Optional[str] = None
     terms_2: Optional[str] = None
     terms_3: Optional[str] = None

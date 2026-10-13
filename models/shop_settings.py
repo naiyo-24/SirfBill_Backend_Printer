@@ -23,6 +23,7 @@ class ShopSettings(Base):
     ac_holder_name = Column(String, nullable=True)
     ac_number = Column(String, nullable=True)
     ifsc_code = Column(String, nullable=True)
+    upi_id = Column(String, nullable=True)
     
     terms_1 = Column(Text, nullable=True)
     terms_2 = Column(Text, nullable=True)

@@ -40,16 +40,23 @@ def delete_account(db: Session, db_account: Account) -> Account:
     db.commit()
     return db_account
 
-def get_dashboard_summary(db: Session, shop_id: Optional[UUID] = None) -> AccountSummary:
+def get_dashboard_summary(db: Session, shop_id: Optional[UUID] = None, tenant_id: Optional[UUID] = None) -> AccountSummary:
     from models.enums import AccountType, TransactionType
     from models.transaction import Transaction
+    from sqlalchemy import or_
 
     accounts_query = db.query(Account)
     transactions_query = db.query(func.sum(Transaction.amount))
     
-    if shop_id:
+    if shop_id and tenant_id:
+        accounts_query = accounts_query.filter(or_(Account.shop_id == shop_id, Account.tenant_id == tenant_id))
+        transactions_query = transactions_query.filter(or_(Transaction.shop_id == shop_id, Transaction.tenant_id == tenant_id))
+    elif shop_id:
         accounts_query = accounts_query.filter(Account.shop_id == shop_id)
         transactions_query = transactions_query.filter(Transaction.shop_id == shop_id)
+    elif tenant_id:
+        accounts_query = accounts_query.filter(Account.tenant_id == tenant_id)
+        transactions_query = transactions_query.filter(Transaction.tenant_id == tenant_id)
         
     accounts = accounts_query.all()
     

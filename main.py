@@ -26,6 +26,7 @@ Base.metadata.create_all(bind=engine)
 try:
     with engine.begin() as conn:
         conn.execute(sa.text("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS cin_number VARCHAR;"))
+        conn.execute(sa.text("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS upi_id VARCHAR;"))
         conn.execute(sa.text("ALTER TABLE inventory_items ALTER COLUMN expiry_date DROP NOT NULL;"))
 except Exception as e:
     print(f"Schema migration note: {e}")

@@ -65,3 +65,7 @@ class PurchaseBillOut(PurchaseBillBase):
     items: List[PurchaseBillItemOut]
 
     model_config = ConfigDict(from_attributes=True)
+
+class PayPurchaseBillRequest(BaseModel):
+    account_id: Optional[UUID] = None
+    payment_method: Optional[str] = "CASH"

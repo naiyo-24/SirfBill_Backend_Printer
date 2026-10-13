@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
 from typing import List, Optional
@@ -11,12 +12,15 @@ def get_transaction(db: Session, transaction_id: UUID) -> Optional[Transaction]:
     return db.query(Transaction).filter(Transaction.id == transaction_id).first()
 
 def get_transactions(db: Session, shop_id: Optional[UUID] = None, tenant_id: Optional[UUID] = None, skip: int = 0, limit: int = 100) -> List[Transaction]:
+    from sqlalchemy import or_
     query = db.query(Transaction)
-    if shop_id:
+    if shop_id and tenant_id:
+        query = query.filter(or_(Transaction.shop_id == shop_id, Transaction.tenant_id == tenant_id))
+    elif shop_id:
         query = query.filter(Transaction.shop_id == shop_id)
-    if tenant_id:
+    elif tenant_id:
         query = query.filter(Transaction.tenant_id == tenant_id)
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(Transaction.date.desc(), Transaction.created_at.desc()).offset(skip).limit(limit).all()
 
 def create_transaction(db: Session, transaction: TransactionCreate, context_tenant_id: Optional[UUID] = None) -> Transaction:
     transaction_data = transaction.model_dump()
@@ -69,6 +73,11 @@ def create_transaction(db: Session, transaction: TransactionCreate, context_tena
     if db_transaction.from_account_id:
         from_acc = db.query(Account).filter(Account.id == db_transaction.from_account_id).first()
         if from_acc:
+            if from_acc.balance < db_transaction.amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"There is not enough money in {from_acc.name}. Available balance is ₹{from_acc.balance:,.2f}, but ₹{db_transaction.amount:,.2f} is required."
+                )
             from_acc.balance -= db_transaction.amount
             
     if db_transaction.to_account_id:
@@ -137,6 +146,13 @@ def update_transaction(db: Session, db_transaction: Transaction, transaction_upd
     if db_transaction.from_account_id:
         from_acc = db.query(Account).filter(Account.id == db_transaction.from_account_id).first()
         if from_acc:
+            if from_acc.balance < db_transaction.amount:
+                # Re-deduct reversed amount before error so state is consistent
+                from_acc.balance -= db_transaction.amount
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"There is not enough money in {from_acc.name}. Available balance is ₹{from_acc.balance + db_transaction.amount:,.2f}, but ₹{db_transaction.amount:,.2f} is required."
+                )
             from_acc.balance -= db_transaction.amount
             
     if db_transaction.to_account_id:

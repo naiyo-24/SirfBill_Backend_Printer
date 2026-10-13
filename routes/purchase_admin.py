@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
@@ -9,7 +9,7 @@ from models.user import User
 from models.purchase import PurchaseBill, PurchaseBillItem
 from models.inventory import InventoryItem
 from models.distributor import Distributor
-from schemas.purchase import PurchaseBillCreate, PurchaseBillOut
+from schemas.purchase import PurchaseBillCreate, PurchaseBillOut, PayPurchaseBillRequest
 from models.account import Account
 from models.transaction import Transaction
 from models.transaction_category import TransactionCategory
@@ -96,59 +96,87 @@ def create_purchase_bill(
                     inventory.gst = item.gst
     
     # 3. Integrate with Accounts (if payment is made)
-    if request.payment_status in ["PAID", "PARTIAL"] and request.payment_method:
-        account_name = "Cash Account" if request.payment_method == "CASH" else "Bank Account"
-        account = db.query(Account).filter(Account.name == account_name, Account.tenant_id == admin_user.tenant_id, Account.shop_id == request.shop_id).first()
-        if not account:
-            account = Account(name=account_name, account_type=AccountType.ASSET, tenant_id=admin_user.tenant_id, shop_id=request.shop_id)
-            db.add(account)
-            db.flush()
-            
-        category = db.query(TransactionCategory).filter(TransactionCategory.name == "Inventory Purchase", TransactionCategory.tenant_id == admin_user.tenant_id).first()
-        if not category:
-            category = TransactionCategory(name="Inventory Purchase", transaction_type=TransactionType.EXPENSE, tenant_id=admin_user.tenant_id)
-            db.add(category)
-            db.flush()
-            
-        transaction = Transaction(
-            reference_number=f"PUR-{str(new_bill.id)[:8].upper()}",
-            description=f"Purchase from Distributor - {request.invoice_no}",
-            amount=request.amount_paid,
-            transaction_type=TransactionType.EXPENSE,
-            tenant_id=admin_user.tenant_id,
-            shop_id=request.shop_id,
-            category_id=category.id,
-            from_account_id=account.id # Money leaving account
+    if request.payment_status in ["PAID", "PARTIAL"]:
+        amount_to_pay = (
+            request.amount_paid 
+            if (request.amount_paid is not None and request.amount_paid > 0) 
+            else (request.total_amount if request.payment_status == "PAID" else 0.0)
         )
-        db.add(transaction)
-        account.balance -= request.total_amount
         
+        if amount_to_pay > 0:
+            account = None
+            if request.payment_method:
+                account_name = "Cash Account" if request.payment_method.upper() == "CASH" else "Bank Account"
+                account = db.query(Account).filter(
+                    Account.name.ilike(f"%{account_name}%"),
+                    Account.tenant_id == admin_user.tenant_id,
+                    Account.shop_id == request.shop_id
+                ).first()
 
-    # 3. Create Expense Transaction if PAID
-    if request.payment_status == "PAID":
-        shop_account = db.query(Account).filter(Account.shop_id == request.shop_id, Account.account_type == AccountType.ASSET).first()
-        if not shop_account:
-            shop_account = db.query(Account).filter(Account.shop_id == request.shop_id).first()
-            
-        distributor = db.query(Distributor).filter(Distributor.id == request.distributor_id).first()
-        distributor_name = distributor.name if distributor else "Unknown Distributor"
-        
-        if shop_account:
-            shop_account.balance -= request.amount_paid
-            
-            expense_txn = Transaction(
-                tenant_id=admin_user.tenant_id,
-                shop_id=request.shop_id,
-                from_account_id=shop_account.id,
-                amount=request.amount_paid,
+            if not account:
+                account = db.query(Account).filter(
+                    Account.shop_id == request.shop_id,
+                    Account.account_type == AccountType.ASSET,
+                    Account.balance >= amount_to_pay
+                ).first()
+
+            if not account:
+                account = db.query(Account).filter(
+                    Account.shop_id == request.shop_id,
+                    Account.account_type == AccountType.ASSET
+                ).first()
+
+            if not account:
+                account = db.query(Account).filter(
+                    Account.tenant_id == admin_user.tenant_id,
+                    Account.account_type == AccountType.ASSET
+                ).first()
+
+            if not account:
+                raise HTTPException(
+                    status_code=400,
+                    detail="There is no money in the accounts section. No active payment account found. Please add an account with money first."
+                )
+
+            if account.balance < amount_to_pay:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"There is not enough money in the accounts section ({account.name}). Available balance: ₹{account.balance:,.2f}, required: ₹{amount_to_pay:,.2f}."
+                )
+
+            account.balance -= amount_to_pay
+            new_bill.amount_paid = amount_to_pay
+
+            category = db.query(TransactionCategory).filter(
+                TransactionCategory.name == "Inventory Purchase",
+                TransactionCategory.tenant_id == admin_user.tenant_id
+            ).first()
+            if not category:
+                category = TransactionCategory(
+                    name="Inventory Purchase",
+                    transaction_type=TransactionType.EXPENSE,
+                    tenant_id=admin_user.tenant_id
+                )
+                db.add(category)
+                db.flush()
+
+            distributor = db.query(Distributor).filter(Distributor.id == request.distributor_id).first()
+            distributor_name = distributor.name if distributor else "Unknown Distributor"
+
+            transaction = Transaction(
+                reference_number=f"PUR-{str(new_bill.id)[:8].upper()}",
+                description=f"Purchase from Distributor - {request.invoice_no or 'Auto'}",
+                amount=amount_to_pay,
                 transaction_type=TransactionType.EXPENSE,
+                tenant_id=request.shop_id or admin_user.tenant_id,
+                shop_id=request.shop_id,
+                category_id=category.id,
+                from_account_id=account.id,
                 entity_name=distributor_name,
                 entity_type="SUPPLIER",
-                status="PAID",
-                description=f"Purchase Bill Invoice: {request.invoice_no or 'Auto'}",
-                reference_number=f"PB-{new_bill.id}"
+                status="PAID"
             )
-            db.add(expense_txn)
+            db.add(transaction)
 
     db.commit()
     db.refresh(new_bill)
@@ -176,6 +204,9 @@ def get_purchase_bills(
 @router.patch("/{bill_id}/pay")
 def pay_purchase_bill(
     bill_id: UUID,
+    payload: Optional[PayPurchaseBillRequest] = None,
+    account_id: Optional[UUID] = Query(None),
+    payment_method: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     admin_user: User = Depends(get_admin_user)
 ):
@@ -185,38 +216,119 @@ def pay_purchase_bill(
         
     if bill.payment_status == "PAID":
         raise HTTPException(status_code=400, detail="Bill is already paid")
-        
-    # Mark as PAID
+
+    # Calculate remaining amount to pay
+    amount_to_pay = bill.total_amount - (bill.amount_paid or 0.0)
+    if amount_to_pay <= 0:
+        amount_to_pay = bill.total_amount
+
+    # Resolve account and payment method
+    selected_account_id = (payload.account_id if payload else None) or account_id
+    selected_method = (payload.payment_method if payload else None) or payment_method or bill.payment_method or "CASH"
+
+    account = None
+    if selected_account_id:
+        account = db.query(Account).filter(Account.id == selected_account_id).first()
+        if not account:
+            raise HTTPException(status_code=404, detail="Selected payment account not found.")
+
+    if not account and selected_method:
+        if selected_method.upper() == "CASH":
+            account = db.query(Account).filter(
+                Account.shop_id == bill.shop_id,
+                Account.name.ilike("%cash%"),
+                Account.account_type == AccountType.ASSET
+            ).first()
+        else:
+            account = db.query(Account).filter(
+                Account.shop_id == bill.shop_id,
+                ~Account.name.ilike("%cash%"),
+                Account.account_type == AccountType.ASSET
+            ).first()
+
+    # If no account matched method, look for an asset account with enough balance
+    if not account:
+        account = db.query(Account).filter(
+            Account.shop_id == bill.shop_id,
+            Account.account_type == AccountType.ASSET,
+            Account.balance >= amount_to_pay
+        ).first()
+
+    # Fallback to any asset account for the shop
+    if not account:
+        account = db.query(Account).filter(
+            Account.shop_id == bill.shop_id,
+            Account.account_type == AccountType.ASSET
+        ).first()
+
+    # Fallback to tenant asset account
+    if not account:
+        account = db.query(Account).filter(
+            Account.tenant_id == (bill.tenant_id or admin_user.tenant_id),
+            Account.account_type == AccountType.ASSET
+        ).first()
+
+    # Validate that account exists
+    if not account:
+        raise HTTPException(
+            status_code=400,
+            detail="There is no money in the accounts section. No active payment account found. Please create an account with funds first."
+        )
+
+    # Validate sufficient funds in the accounts section
+    if account.balance < amount_to_pay:
+        raise HTTPException(
+            status_code=400,
+            detail=f"There is not enough money in the accounts section ({account.name}). Available balance: ₹{account.balance:,.2f}, required: ₹{amount_to_pay:,.2f}."
+        )
+
+    # Deduct balance
+    account.balance -= amount_to_pay
     bill.payment_status = "PAID"
-    
-    # Create Expense Transaction
-    shop_account = db.query(Account).filter(Account.shop_id == bill.shop_id, Account.account_type == AccountType.ASSET).first()
-    if not shop_account:
-        shop_account = db.query(Account).filter(Account.shop_id == bill.shop_id).first()
-        
+    bill.amount_paid = bill.total_amount
+    bill.payment_method = selected_method
+
+    # Resolve category
+    category = db.query(TransactionCategory).filter(
+        TransactionCategory.name == "Inventory Purchase",
+        TransactionCategory.tenant_id == admin_user.tenant_id
+    ).first()
+    if not category:
+        category = TransactionCategory(
+            name="Inventory Purchase",
+            transaction_type=TransactionType.EXPENSE,
+            tenant_id=admin_user.tenant_id
+        )
+        db.add(category)
+        db.flush()
+
     distributor = db.query(Distributor).filter(Distributor.id == bill.distributor_id).first()
     distributor_name = distributor.name if distributor else "Unknown Distributor"
-    
-    if shop_account:
-        shop_account.balance -= bill.total_amount
-        
-        expense_txn = Transaction(
-            tenant_id=bill.tenant_id,
-            shop_id=bill.shop_id,
-            from_account_id=shop_account.id,
-            amount=bill.total_amount,
-            transaction_type=TransactionType.EXPENSE,
-            entity_name=distributor_name,
-            entity_type="SUPPLIER",
-            status="PAID",
-            description=f"Purchase Bill Invoice: {bill.invoice_no or 'Auto'}",
-            reference_number=f"PB-{bill.id}"
-        )
-        db.add(expense_txn)
-        
+
+    # Record expense transaction
+    expense_txn = Transaction(
+        tenant_id=bill.shop_id or bill.tenant_id or admin_user.tenant_id,
+        shop_id=bill.shop_id,
+        from_account_id=account.id,
+        amount=amount_to_pay,
+        transaction_type=TransactionType.EXPENSE,
+        category_id=category.id,
+        entity_name=distributor_name,
+        entity_type="SUPPLIER",
+        status="PAID",
+        description=f"Purchase Bill Invoice: {bill.invoice_no or 'Auto'}",
+        reference_number=f"PB-{str(bill.id)[:8].upper()}"
+    )
+    db.add(expense_txn)
+
     db.commit()
     db.refresh(bill)
-    return {"status": "success", "message": "Bill marked as paid"}
+    return {
+        "status": "success",
+        "message": f"Bill marked as paid using {account.name}. Remaining balance: ₹{account.balance:,.2f}",
+        "account_name": account.name,
+        "remaining_balance": account.balance
+    }
 
 
 from fastapi.responses import StreamingResponse

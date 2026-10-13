@@ -15,11 +15,11 @@ router = APIRouter(
 from typing import List, Optional
 
 @router.get("/summary", response_model=AccountSummary)
-def get_dashboard_summary(shop_id: Optional[UUID] = None, db: Session = Depends(get_db)):
+def get_dashboard_summary(shop_id: Optional[UUID] = None, tenant_id: Optional[UUID] = None, db: Session = Depends(get_db)):
     """
     Get dashboard summary metrics (Cash, Bank, Income, Expenses, Net Profit)
     """
-    return crud_account.get_dashboard_summary(db, shop_id=shop_id)
+    return crud_account.get_dashboard_summary(db, shop_id=shop_id, tenant_id=tenant_id)
 
 @router.get("", response_model=List[AccountResponse])
 def get_accounts(shop_id: Optional[UUID] = None, tenant_id: Optional[UUID] = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
