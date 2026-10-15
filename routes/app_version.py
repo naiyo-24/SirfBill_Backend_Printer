@@ -19,8 +19,8 @@ class AppVersionResponse(BaseModel):
     mandatory: bool = False
     is_mandatory: bool = False
     release_notes: str = ""
-    package_url: str = "https://billbackend.nalyo24.com/downloads/SirfBill_Setup_1.0.1.exe"
-    download_url: str = "https://billbackend.nalyo24.com/downloads/SirfBill_Setup_1.0.1.exe"
+    package_url: str = "https://billbackend.naiyo24.com/downloads/SirfBill_Setup_1.0.1.exe"
+    download_url: str = "https://billbackend.naiyo24.com/downloads/SirfBill_Setup_1.0.1.exe"
     sha256: str = ""
     signature_url: str = ""
 
@@ -33,8 +33,8 @@ DEFAULT_VERSION_DATA = {
     "mandatory": False,
     "is_mandatory": False,
     "release_notes": "• Improved custom billing & history sync\n• Auto-naming invoice PDFs\n• Performance improvements",
-    "package_url": "https://billbackend.nalyo24.com/downloads/SirfBill_Setup_1.0.1.exe",
-    "download_url": "https://billbackend.nalyo24.com/downloads/SirfBill_Setup_1.0.1.exe",
+    "package_url": "https://billbackend.naiyo24.com/downloads/SirfBill_Setup_1.0.1.exe",
+    "download_url": "https://billbackend.naiyo24.com/downloads/SirfBill_Setup_1.0.1.exe",
     "sha256": "",
     "signature_url": ""
 }
